@@ -5,12 +5,13 @@
 #include <sdk/os/debug.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 APP_NAME("SH7305 Probe")
 APP_AUTHOR("Artem Novak")
 APP_DESCRIPTION("SH7305 CPU, MMU and external ROM probe")
-APP_VERSION("1.0.0")
+APP_VERSION("1.1.0")
 
 static constexpr uint32_t ROM_SIZE = 0x180000u;
 static constexpr uint32_t ROM_MID = 0x080000u;
@@ -19,11 +20,44 @@ static constexpr char ROM_FILE[] = "/romprobe.bin";
 static constexpr char REPORT_FILE[] = "/results.txt";
 static uint8_t chunk[4096];
 
-__attribute__((used, noinline)) static void probe_code_anchor() { __asm__ volatile("" ::: "memory"); }
+__attribute__((used, noinline)) static void probe_code_anchor()
+{
+    __asm__ volatile("" ::: "memory");
+}
 
 static uint32_t reg(uint32_t address)
 {
     return *reinterpret_cast<volatile const uint32_t *>(address);
+}
+
+static uint32_t address_of(const void *p)
+{
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+}
+
+struct Mapping {
+    uint32_t va = 0xffffffffu;
+    uint32_t pa = 0xffffffffu;
+    uint32_t p1 = 0xffffffffu;
+    uint32_t page = 0;
+    bool valid = false;
+    bool direct = false;
+};
+
+/* P1/P2 are physical aliases even when MMUCR.AT is set. Do not infer
+   physical addresses for P0 without an independently verified UTLB
+   translation; reading a stale P4 TLB array in HH3 can fault on hardware. */
+static Mapping mapping_of(const void *p)
+{
+    Mapping m;
+    m.va = address_of(p);
+    m.direct = m.va >= 0x80000000u && m.va < 0xc0000000u;
+    if(m.direct) {
+        m.pa = m.va & 0x1fffffffu;
+        m.p1 = m.pa | 0x80000000u;
+        m.valid = true;
+    }
+    return m;
 }
 
 struct RomResult {
@@ -33,9 +67,12 @@ struct RomResult {
     bool marks[3] = {};
     uint32_t read_bytes = 0;
     uint32_t first_bad = 0xffffffffu;
+    uint8_t *resident = nullptr;
 };
 
-/* Only reads filesystem data; it never inserts/modifies TLB entries. */
+/* Reading into an explicitly allocated 1.5 MiB buffer creates an actual
+   RAM-resident image independent of HH3 .rodata. If allocation fails, the
+   streaming integrity test still runs and the sample map is reported N/A. */
 static RomResult verify_rom()
 {
     RomResult r;
@@ -52,9 +89,12 @@ static RomResult verify_rom()
         std::fclose(f);
         return r;
     }
+
+    r.resident = static_cast<uint8_t *>(std::malloc(ROM_SIZE));
     while(r.read_bytes < ROM_SIZE) {
         size_t count = ROM_SIZE - r.read_bytes;
         if(count > sizeof(chunk)) count = sizeof(chunk);
+        /* Both the allocation-backed and fallback paths use bounded I/O. */
         size_t n = std::fread(chunk, 1, count, f);
         if(n == 0) break;
         for(size_t i = 0; i < n; ++i) {
@@ -68,68 +108,151 @@ static RomResult verify_rom()
             if(offset == ROM_MID) r.marks[1] = chunk[i] == 0xa5;
             if(offset == ROM_LAST) r.marks[2] = chunk[i] == 0x3c;
         }
+        if(r.resident)
+            std::memcpy(r.resident + r.read_bytes, chunk, n);
         r.read_bytes += static_cast<uint32_t>(n);
     }
     r.complete = r.read_bytes == ROM_SIZE && r.first_bad == 0xffffffffu;
     std::fclose(f);
+    if(!r.complete) {
+        std::free(r.resident);
+        r.resident = nullptr;
+    }
     return r;
 }
 
 static const char *yesno(bool value) { return value ? "YES" : "NO"; }
 
+static const char *mapped(bool value) { return value ? "YES" : "N/A"; }
+
+static void print_sample(FILE *out, const char *label, const uint8_t *sample,
+                         uint32_t expected)
+{
+    std::fprintf(out, "\n%s\n", label);
+    if(!sample) {
+        std::fprintf(out, "VA N/A\nPA N/A\nP1 N/A\nPAGE bytes N/A\n"
+                          "VA value N/A\nP1 value N/A\nAlias match: N/A\n");
+        return;
+    }
+    Mapping m = mapping_of(sample);
+    std::fprintf(out, "VA %08lX\n", m.va);
+    if(!m.valid) {
+        std::fprintf(out, "PA N/A\nP1 N/A\nPAGE bytes N/A\n"
+                          "VA value %08lX\nP1 value N/A\n"
+                          "Alias match: N/A\n", static_cast<uint32_t>(*sample));
+        return;
+    }
+    uint32_t v = *sample;
+    uint32_t p1 = *reinterpret_cast<volatile const uint8_t *>(m.p1);
+    std::fprintf(out,
+        "PA %08lX\nP1 %08lX\nPAGE bytes N/A (direct P1/P2)\n"
+        "VA value %08lX\nP1 value %08lX\nAlias match: %s\n"
+        "Expected %08lX\n",
+        m.pa, m.p1, v, p1, yesno(v == p1), expected);
+}
+
+/* Output to both a text file and the debug console, without storing a
+   second large buffer of formatted text. */
+static void write_report(FILE *out, uint32_t pvr, uint32_t prr,
+                         uint32_t cvr, uint32_t cpidr, uint32_t mmucr,
+                         uint32_t frqcr, uint32_t pllcr, uint32_t fllfrq,
+                         Mapping code, uint16_t code_word, RomResult const &r)
+{
+    std::fprintf(out,
+        "SH7305 PROBE RESULTS\n"
+        "====================\n\n"
+        "PVR   %08lX\nPRR   %08lX\nCVR   %08lX\nCPIDR %08lX\n"
+        "MMUCR %08lX (AT %s)\n\n"
+        "USER RAM\n"
+        "VA 08100000\n"
+        "PA N/A (no P0 translation available)\n"
+        "P1 N/A\nPAGE bytes N/A\nRAM span bytes N/A\n\n"
+        "SH7305 CLOCKS (raw)\n"
+        "FRQCR  %08lX\nPLLCR  %08lX\nFLLFRQ %08lX\n"
+        "Frequency Hz: N/A\n\n",
+        pvr, prr, cvr, cpidr, mmucr, yesno((mmucr & 1u) != 0),
+        frqcr, pllcr, fllfrq);
+
+    std::fprintf(out, "ADDIN CODE\nVA %08lX\n", code.va);
+    if(code.valid) {
+        uint16_t alias = *reinterpret_cast<volatile const uint16_t *>(code.p1);
+        std::fprintf(out,
+            "PA %08lX\nP1 %08lX\nPAGE bytes N/A (direct P1/P2)\n"
+            "VA value %08lX\nP1 value %08lX\nAlias match: %s\n",
+            code.pa, code.p1, static_cast<uint32_t>(code_word),
+            static_cast<uint32_t>(alias), yesno(alias == code_word));
+    }
+    else
+        std::fprintf(out, "PA N/A\nP1 N/A\nPAGE bytes N/A\n"
+                          "VA value %08lX\nP1 value N/A\nAlias match: N/A\n",
+                          static_cast<uint32_t>(code_word));
+
+    print_sample(out, "ROM 1.5M START",
+                 r.resident ? r.resident : nullptr, 0x5a);
+    print_sample(out, "ROM 1.5M MID",
+                 r.resident ? r.resident + ROM_MID : nullptr, 0xa5);
+    print_sample(out, "ROM 1.5M END",
+                 r.resident ? r.resident + ROM_LAST : nullptr, 0x3c);
+
+    bool sample_map = r.resident &&
+        mapping_of(r.resident).valid &&
+        mapping_of(r.resident + ROM_MID).valid &&
+        mapping_of(r.resident + ROM_LAST).valid;
+    bool contiguous = false;
+    if(sample_map) {
+        Mapping a = mapping_of(r.resident);
+        Mapping b = mapping_of(r.resident + ROM_MID);
+        Mapping c = mapping_of(r.resident + ROM_LAST);
+        contiguous = b.pa - a.pa == ROM_MID &&
+                     c.pa - a.pa == ROM_LAST;
+    }
+    std::fprintf(out,
+        "\nRAM-BACKED ROM IMAGE TEST\n"
+        "ROM bytes %08lX\n"
+        "Sample map: %s\n"
+        "Samples contiguous in RAM: %s\n"
+        "Resident allocation: %s\n"
+        "Source file: %s\n"
+        "Opened: %s\nSize OK: %s\nBytes read: %lu\n"
+        "Marker start 5A: %s\nMarker mid A5: %s\nMarker end 3C: %s\n"
+        "First bad offset: %08lX\nDATA: %s\n"
+        "NOTE: RAM sample contiguity is NOT storage/ROM contiguity.\n",
+        ROM_SIZE, mapped(sample_map),
+        sample_map ? yesno(contiguous) : "N/A",
+        yesno(r.resident != nullptr), ROM_FILE,
+        yesno(r.opened), yesno(r.size_ok), r.read_bytes,
+        yesno(r.marks[0]), yesno(r.marks[1]), yesno(r.marks[2]),
+        r.first_bad, r.complete ? "PASS" : "FAIL");
+}
+
 int main(int argc, char **argv, char **envp)
 {
-    (void)argc;
-    (void)argv;
-    (void)envp;
+    (void)argc; (void)argv; (void)envp;
 
-    const uint32_t pvr = reg(0xff000030);
-    const uint32_t cvr = reg(0xff000040);
-    const uint32_t prr = reg(0xff000044);
-    const uint32_t cpidr = reg(0xff000048);
-    const uint32_t mmucr = reg(0xff000010);
-    const uint32_t frqcr = reg(0xa4150000); // raw CPG values: verify on device
-    const uint32_t code_va = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&probe_code_anchor));
-    const bool direct = code_va >= 0x80000000u && code_va < 0xc0000000u;
-    const uint32_t code_pa = direct ? (code_va & 0x1fffffffu) : 0xffffffffu;
-    const uint32_t code_p1 = direct ? (code_pa | 0x80000000u) : 0xffffffffu;
-    const uint32_t va_word = reg(code_va);
-    const uint32_t p1_word = direct ? reg(code_p1) : 0;
+    uint32_t pvr = reg(0xff000030);
+    uint32_t prr = reg(0xff000044);
+    uint32_t cvr = reg(0xff000040);
+    uint32_t cpidr = reg(0xff000048);
+    uint32_t mmucr = reg(0xff000010);
+    uint32_t frqcr = reg(0xa4150000);
+    uint32_t pllcr = reg(0xa4150024);
+    uint32_t fllfrq = reg(0xa4150050);
+    Mapping code = mapping_of(reinterpret_cast<void *>(&probe_code_anchor));
+    uint16_t code_word = *reinterpret_cast<volatile const uint16_t *>(code.va);
 
     RomResult r = verify_rom();
-    char report[1200];
-    int n = std::snprintf(report, sizeof(report),
-        "SH7305 STANDALONE PROBE\n"
-        "CPU\nPVR=%08lX\nPRR=%08lX\nCVR=%08lX\nCPID=%08lX\n"
-        "MMU\nMMUCR=%08lX\nAT=%s\nURC=%lu\nURB=%lu\n"
-        "CLOCK\nFRQCR=%08lX\n"
-        "CODE\nVA=%08lX\nPA=%08lX\nP1=%08lX\n"
-        "VA_WORD=%08lX\nP1_WORD=%08lX\nMATCH=%s\n"
-        "EXTERNAL ROM\nPATH=%s\nSIZE=%lu\nOPEN=%s\nSIZE_OK=%s\n"
-        "READ=%lu\nSTART_5A=%s\nMID_A5=%s\nEND_3C=%s\n"
-        "FIRST_BAD=%08lX\nDATA=%s\n"
-        "NOTE: A filesystem test is not a physical ROM mapping test.\n",
-        pvr, prr, cvr, cpidr, mmucr, yesno((mmucr & 1u) != 0),
-        (mmucr >> 10) & 63u, (mmucr >> 18) & 63u,
-        frqcr, code_va, code_pa, code_p1, va_word, p1_word,
-        yesno(direct && va_word == p1_word),
-        ROM_FILE, ROM_SIZE, yesno(r.opened), yesno(r.size_ok),
-        r.read_bytes, yesno(r.marks[0]), yesno(r.marks[1]),
-        yesno(r.marks[2]), r.first_bad, r.complete ? "PASS" : "FAIL");
-
+    FILE *out = std::fopen(REPORT_FILE, "wb");
     bool saved = false;
-    if(n >= 0 && static_cast<size_t>(n) < sizeof(report)) {
-        FILE *out = std::fopen(REPORT_FILE, "wb");
-        if(out) {
-            saved = std::fwrite(report, 1, static_cast<size_t>(n), out) ==
-                static_cast<size_t>(n);
-            if(std::fclose(out) != 0) saved = false;
-        }
+    if(out) {
+        write_report(out, pvr, prr, cvr, cpidr, mmucr,
+                     frqcr, pllcr, fllfrq, code, code_word, r);
+        saved = std::fclose(out) == 0;
     }
-
-    std::printf("%s", report);
-    std::printf("RESULTS /results.txt: %s\n", saved ? "SAVED" : "FAILED");
+    write_report(stdout, pvr, prr, cvr, cpidr, mmucr,
+                 frqcr, pllcr, fllfrq, code, code_word, r);
+    std::printf("\nRESULTS /results.txt: %s\n", saved ? "SAVED" : "FAILED");
     std::fflush(stdout);
+    std::free(r.resident);
     Debug_WaitKey();
-    return saved ? 0 : 1;
+    return saved && r.complete ? 0 : 1;
 }
