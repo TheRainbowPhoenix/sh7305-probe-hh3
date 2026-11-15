@@ -88,6 +88,6 @@ compile_commands.json:
 $(OUTDIR)/romprobe.bin: Makefile
 	@mkdir -p $(OUTDIR)
 	dd if=/dev/zero of=$@ bs=4096 count=384 status=none
-	printf '\\132' | dd of=$@ bs=1 seek=0 conv=notrunc status=none
-	printf '\\245' | dd of=$@ bs=1 seek=524288 conv=notrunc status=none
-	printf '\\074' | dd of=$@ bs=1 seek=1572863 conv=notrunc status=none
+	printf '%b' '\\132' | dd of=$@ bs=1 seek=0 conv=notrunc status=none
+	printf '%b' '\\245' | dd of=$@ bs=1 seek=524288 conv=notrunc status=none
+	printf '%b' '\\074' | dd of=$@ bs=1 seek=1572863 conv=notrunc status=none
