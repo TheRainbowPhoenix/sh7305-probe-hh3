@@ -29,7 +29,7 @@ READELF:=sh4a_nofpueb-elf-readelf
 OBJCOPY:=sh4a_nofpueb-elf-objcopy
 STRIP:=sh4a_nofpueb-elf-strip
 
-APP_ELF := $(OUTDIR)/CPapp.elf
+APP_ELF := $(OUTDIR)/sh7305-probe.elf
 APP_HH3 := $(APP_ELF:.elf=.hh3)
 
 AS_SOURCES:=$(shell find $(SOURCEDIR) -name '*.S')
@@ -43,7 +43,7 @@ NOLTOOBJS := $(foreach obj, $(OBJECTS), $(if $(findstring /nolto/, $(obj)), $(ob
 
 DEPFILES := $(OBJECTS:$(BUILDDIR)/%.o=$(DEPDIR)/%.d)
 
-hh3: $(APP_HH3) Makefile
+hh3: $(APP_HH3) Makefile $(OUTDIR)/romprobe.bin
 elf: $(APP_ELF) Makefile
 
 all: elf hh3
@@ -84,3 +84,7 @@ compile_commands.json:
 .PHONY: elf hh3 all clean compile_commands.json
 
 -include $(DEPFILES)
+# Binary remains separate from HH3, so the add-in does not exceed its size limit.
+$(OUTDIR)/romprobe.bin: tools/make_romprobe.py
+	@mkdir -p $(OUTDIR)
+	python3 $< $@
