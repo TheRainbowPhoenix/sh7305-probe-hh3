@@ -1,0 +1,26 @@
+name: Build SH7305 standalone HH3
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/classpaddev/hollyhock-3:v2.2.2
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        run: make -j4
+      - name: Verify files
+        run: |
+          test -s dist/sh7305-probe.hh3
+          test "$(stat -c %s dist/romprobe.bin)" -eq 1572864
+          test "$(stat -c %s dist/sh7305-probe.hh3)" -lt 1572864
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SH7305-standalone-HH3
+          path: |
+            dist/sh7305-probe.hh3
+            dist/romprobe.bin
+          if-no-files-found: error
