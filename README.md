@@ -1,25 +1,16 @@
-# HHK3template
-A modern template for HHK3!
+# SH7305 standalone HH3 diagnostic (no gint)
 
-Checkout the other branches for more variants.
+Build with the Hollyhock-3 SDK using `make -j4`.
 
-## How to Setup
-1. Clone to project
-2. Enter the devcontainer
-3. `make compile_commands.json` or use the vscode task
-4. Restart clangd (eg. via CRTL+SHIFT+P in vscode)
+Copy `dist/sh7305-probe.hh3` and `dist/romprobe.bin` to the calculator's
+storage root. The probe reads the 1.5 MiB external file in 4 KiB chunks and
+writes `/results.txt` (calculator storage `\\fls0\\results.txt`),
+overwriting the previous result. Diagnostic output also appears on the
+Hollyhock debug console; press a key to exit.
 
-## How to build
-```sh
-make -j
-```
-Or execute the default vscode build task with CRTL+SHIFT+B
+The probe reads CPU, MMUCR, URC and URB values and performs direct P1/P2
+code alias checks where appropriate. It does not modify TLB mappings.
+The file verification is **not** evidence of contiguous physical ROM mapping.
 
-## How to run
-Copy `dist/CPapp.hh3` to the root of the calculator when connected in usb storage mode and then select and run from the launcher.
-
-## How to change the file name (recommended)
-Open the Makefile and adjust this line to what you want:
-```Makefile
-APP_ELF := $(OUTDIR)/<your_file_name>.elf
-```
+Build verification runs on GitHub Actions, but device execution and
+filesystem-path behavior must still be confirmed on real hardware.
