@@ -19,6 +19,8 @@ static constexpr char ROM_FILE[] = "/romprobe.bin";
 static constexpr char REPORT_FILE[] = "/results.txt";
 static uint8_t chunk[4096];
 
+__attribute__((used, noinline)) static void probe_code_anchor() { __asm__ volatile("" ::: "memory"); }
+
 static uint32_t reg(uint32_t address)
 {
     return *reinterpret_cast<volatile const uint32_t *>(address);
@@ -87,7 +89,7 @@ int main(int argc, char **argv, char **envp)
     const uint32_t cpidr = reg(0xff000048);
     const uint32_t mmucr = reg(0xff000010);
     const uint32_t frqcr = reg(0xa4150000); // raw CPG values: verify on device
-    const uint32_t code_va = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&main));
+    const uint32_t code_va = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&probe_code_anchor));
     const bool direct = code_va >= 0x80000000u && code_va < 0xc0000000u;
     const uint32_t code_pa = direct ? (code_va & 0x1fffffffu) : 0xffffffffu;
     const uint32_t code_p1 = direct ? (code_pa | 0x80000000u) : 0xffffffffu;
