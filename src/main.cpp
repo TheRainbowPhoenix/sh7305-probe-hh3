@@ -98,14 +98,14 @@ int main(int argc, char **argv, char **envp)
     char report[1200];
     int n = std::snprintf(report, sizeof(report),
         "SH7305 STANDALONE PROBE\n"
-        "CPU\nPVR=%08X\nPRR=%08X\nCVR=%08X\nCPID=%08X\n"
-        "MMU\nMMUCR=%08X\nAT=%s\nURC=%u\nURB=%u\n"
-        "CLOCK\nFRQCR=%08X\n"
-        "CODE\nVA=%08X\nPA=%08X\nP1=%08X\n"
-        "VA_WORD=%08X\nP1_WORD=%08X\nMATCH=%s\n"
-        "EXTERNAL ROM\nPATH=%s\nSIZE=%u\nOPEN=%s\nSIZE_OK=%s\n"
-        "READ=%u\nSTART_5A=%s\nMID_A5=%s\nEND_3C=%s\n"
-        "FIRST_BAD=%08X\nDATA=%s\n"
+        "CPU\nPVR=%08lX\nPRR=%08lX\nCVR=%08lX\nCPID=%08lX\n"
+        "MMU\nMMUCR=%08lX\nAT=%s\nURC=%lu\nURB=%lu\n"
+        "CLOCK\nFRQCR=%08lX\n"
+        "CODE\nVA=%08lX\nPA=%08lX\nP1=%08lX\n"
+        "VA_WORD=%08lX\nP1_WORD=%08lX\nMATCH=%s\n"
+        "EXTERNAL ROM\nPATH=%s\nSIZE=%lu\nOPEN=%s\nSIZE_OK=%s\n"
+        "READ=%lu\nSTART_5A=%s\nMID_A5=%s\nEND_3C=%s\n"
+        "FIRST_BAD=%08lX\nDATA=%s\n"
         "NOTE: A filesystem test is not a physical ROM mapping test.\n",
         pvr, prr, cvr, cpidr, mmucr, yesno((mmucr & 1u) != 0),
         (mmucr >> 10) & 63u, (mmucr >> 18) & 63u,
