@@ -47,10 +47,10 @@ struct Mapping {
 /* P1/P2 are physical aliases even when MMUCR.AT is set. Do not infer
    physical addresses for P0 without an independently verified UTLB
    translation; reading a stale P4 TLB array in HH3 can fault on hardware. */
-static Mapping mapping_of(const void *p)
+static Mapping mapping_of_va(uint32_t va)
 {
     Mapping m;
-    m.va = address_of(p);
+    m.va = va;
     m.direct = m.va >= 0x80000000u && m.va < 0xc0000000u;
     if(m.direct) {
         m.pa = m.va & 0x1fffffffu;
@@ -58,6 +58,11 @@ static Mapping mapping_of(const void *p)
         m.valid = true;
     }
     return m;
+}
+
+static Mapping mapping_of(const void *p)
+{
+    return mapping_of_va(address_of(p));
 }
 
 struct RomResult {
@@ -237,7 +242,8 @@ int main(int argc, char **argv, char **envp)
     uint32_t frqcr = reg(0xa4150000);
     uint32_t pllcr = reg(0xa4150024);
     uint32_t fllfrq = reg(0xa4150050);
-    Mapping code = mapping_of(reinterpret_cast<void *>(&probe_code_anchor));
+    Mapping code = mapping_of_va(static_cast<uint32_t>(
+        reinterpret_cast<uintptr_t>(&probe_code_anchor)));
     uint16_t code_word = *reinterpret_cast<volatile const uint16_t *>(code.va);
 
     RomResult r = verify_rom();
