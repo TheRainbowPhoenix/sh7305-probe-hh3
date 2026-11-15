@@ -14,6 +14,7 @@ jobs:
         run: make -j4
       - name: Verify files
         run: |
+          ls -l dist/sh7305-probe.hh3 dist/romprobe.bin
           test -s dist/sh7305-probe.hh3
           test "$(stat -c %s dist/romprobe.bin)" -eq 1572864
           test "$(stat -c %s dist/sh7305-probe.hh3)" -lt 1572864
