@@ -164,6 +164,7 @@ static void write_report(FILE *out, uint32_t pvr, uint32_t prr,
                          uint32_t frqcr, uint32_t pllcr, uint32_t fllfrq,
                          Mapping code, uint16_t code_word, RomResult const &r)
 {
+    (void)mmucr;
     std::fprintf(out,
         "SH7305 PROBE RESULTS\n"
         "====================\n\n"
