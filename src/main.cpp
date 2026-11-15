@@ -127,6 +127,7 @@ static RomResult verify_rom()
 }
 
 static const char *yesno(bool value) { return value ? "YES" : "NO"; }
+static const char *lower(bool value) { return value ? "yes" : "no"; }
 
 static const char *mapped(bool value) { return value ? "YES" : "N/A"; }
 
@@ -151,9 +152,9 @@ static void print_sample(FILE *out, const char *label, const uint8_t *sample,
     uint32_t p1 = *reinterpret_cast<volatile const uint8_t *>(m.p1);
     std::fprintf(out,
         "PA %08lX\nP1 %08lX\nPAGE bytes N/A (direct P1/P2)\n"
-        "VA value %08lX\nP1 value %08lX\nAlias match: %s\n"
-        "Expected %08lX\n",
-        m.pa, m.p1, v, p1, yesno(v == p1), expected);
+        "VA value %08lX\nP1 value %08lX\nAlias match: %s\n",
+        m.pa, m.p1, v, p1, lower(v == p1));
+    (void)expected;
 }
 
 /* Output to both a text file and the debug console, without storing a
@@ -167,25 +168,24 @@ static void write_report(FILE *out, uint32_t pvr, uint32_t prr,
         "SH7305 PROBE RESULTS\n"
         "====================\n\n"
         "PVR   %08lX\nPRR   %08lX\nCVR   %08lX\nCPIDR %08lX\n"
-        "MMUCR %08lX (AT %s)\n\n"
+        "\n"
         "USER RAM\n"
         "VA 08100000\n"
-        "PA N/A (no P0 translation available)\n"
+        "PA N/A\n"
         "P1 N/A\nPAGE bytes N/A\nRAM span bytes N/A\n\n"
         "SH7305 CLOCKS (raw)\n"
         "FRQCR  %08lX\nPLLCR  %08lX\nFLLFRQ %08lX\n"
         "Frequency Hz: N/A\n\n",
-        pvr, prr, cvr, cpidr, mmucr, yesno((mmucr & 1u) != 0),
-        frqcr, pllcr, fllfrq);
+        pvr, prr, cvr, cpidr, frqcr, pllcr, fllfrq);
 
     std::fprintf(out, "ADDIN CODE\nVA %08lX\n", code.va);
     if(code.valid) {
         uint16_t alias = *reinterpret_cast<volatile const uint16_t *>(code.p1);
         std::fprintf(out,
-            "PA %08lX\nP1 %08lX\nPAGE bytes N/A (direct P1/P2)\n"
+            "PA %08lX\nP1 %08lX\nPAGE bytes N/A\n"
             "VA value %08lX\nP1 value %08lX\nAlias match: %s\n",
             code.pa, code.p1, static_cast<uint32_t>(code_word),
-            static_cast<uint32_t>(alias), yesno(alias == code_word));
+            static_cast<uint32_t>(alias), lower(alias == code_word));
     }
     else
         std::fprintf(out, "PA N/A\nP1 N/A\nPAGE bytes N/A\n"
@@ -212,22 +212,17 @@ static void write_report(FILE *out, uint32_t pvr, uint32_t prr,
                      c.pa - a.pa == ROM_LAST;
     }
     std::fprintf(out,
-        "\nRAM-BACKED ROM IMAGE TEST\n"
+        "\nLINUX ROM TEST\n"
         "ROM bytes %08lX\n"
         "Sample map: %s\n"
-        "Samples contiguous in RAM: %s\n"
-        "Resident allocation: %s\n"
-        "Source file: %s\n"
-        "Opened: %s\nSize OK: %s\nBytes read: %lu\n"
-        "Marker start 5A: %s\nMarker mid A5: %s\nMarker end 3C: %s\n"
-        "First bad offset: %08lX\nDATA: %s\n"
-        "NOTE: RAM sample contiguity is NOT storage/ROM contiguity.\n",
+        "Samples contiguous: %s\n"
+        "File integrity: %s\n"
+        "File first bad: %08lX\n"
+        "File read bytes: %08lX\n"
+        "Note: samples are RAM backing; the file is not mapped ROM.\n",
         ROM_SIZE, mapped(sample_map),
         sample_map ? yesno(contiguous) : "N/A",
-        yesno(r.resident != nullptr), ROM_FILE,
-        yesno(r.opened), yesno(r.size_ok), r.read_bytes,
-        yesno(r.marks[0]), yesno(r.marks[1]), yesno(r.marks[2]),
-        r.first_bad, r.complete ? "PASS" : "FAIL");
+        r.complete ? "PASS" : "FAIL", r.first_bad, r.read_bytes);
 }
 
 int main(int argc, char **argv, char **envp)
