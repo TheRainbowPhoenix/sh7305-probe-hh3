@@ -85,6 +85,9 @@ compile_commands.json:
 
 -include $(DEPFILES)
 # Binary remains separate from HH3, so the add-in does not exceed its size limit.
-$(OUTDIR)/romprobe.bin: tools/make_romprobe.py
+$(OUTDIR)/romprobe.bin: Makefile
 	@mkdir -p $(OUTDIR)
-	python3 $< $@
+	dd if=/dev/zero of=$@ bs=4096 count=384 status=none
+	printf '\\132' | dd of=$@ bs=1 seek=0 conv=notrunc status=none
+	printf '\\245' | dd of=$@ bs=1 seek=524288 conv=notrunc status=none
+	printf '\\074' | dd of=$@ bs=1 seek=1572863 conv=notrunc status=none
