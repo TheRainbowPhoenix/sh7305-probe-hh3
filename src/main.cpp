@@ -82,11 +82,11 @@ static RomResult load_rom()
     r.open_rc = fd;
     if(fd < 0) return r;
     r.opened = true;
-    File_Stat stat{};
-    r.stat_rc = static_cast<int>(File_Fstat(fd, &stat));
+    struct File_Stat st{};
+    r.stat_rc = static_cast<int>(File_Fstat(fd, &st));
     if(r.stat_rc == 0) {
-        r.length_rc = static_cast<int>(stat.fileSize);
-        r.size_ok = stat.fileSize == ROM_SIZE;
+        r.length_rc = static_cast<int>(st.fileSize);
+        r.size_ok = st.fileSize == ROM_SIZE;
     }
     if(!r.size_ok) {
         r.close_rc = static_cast<int>(File_Close(fd));
